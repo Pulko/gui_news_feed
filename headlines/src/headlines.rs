@@ -162,14 +162,13 @@ impl Headlines {
 
                 ui.with_layout(Layout::right_to_left(), |ui| {
                     let close_btn = ui.add(Button::new("❎").text_style(egui::TextStyle::Button));
-                    let _refresh_btn =
-                        ui.add(Button::new("🔄").text_style(egui::TextStyle::Button));
+                    let refresh_btn = ui.add(Button::new("🔄").text_style(egui::TextStyle::Button));
                     let theme_btn = ui.add(
                         Button::new({
                             if self.config.dark_mode {
-                                "🌞"
+                                "🌘"
                             } else {
-                                "🌚"
+                                "🌖"
                             }
                         })
                         .text_style(egui::TextStyle::Button),
@@ -181,6 +180,11 @@ impl Headlines {
 
                     if close_btn.clicked() {
                         frame.quit();
+                    }
+
+                    if refresh_btn.clicked() {
+                        // self.preload_news();
+                        tracing::info!("Refreshing news");
                     }
                 })
             });
