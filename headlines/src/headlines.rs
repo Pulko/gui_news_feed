@@ -1,10 +1,16 @@
-use eframe::egui::{self, Button, FontFamily, Label, Layout, TopBottomPanel};
+use confy;
+use eframe::egui::{
+    self, Align2, Button, CtxRef, FontFamily, Label, Layout, TopBottomPanel, Window,
+};
+use eframe::epi::Frame;
+use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 pub const PADDING: f32 = 5.0;
 
 pub struct Headlines {
     articles: Vec<NewsCardData>,
+    pub config: HeadlinesConfig,
 }
 
 pub struct NewsCardData {
@@ -13,7 +19,50 @@ pub struct NewsCardData {
     desciption: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HeadlinesConfig {
+    dark_mode: bool,
+    pub api_key: String,
+    pub api_key_initialized: bool,
+}
+
+impl HeadlinesConfig {
+    pub fn new() -> Self {
+        Self {
+            dark_mode: true,
+            api_key: "".to_string(),
+            api_key_initialized: false,
+        }
+    }
+
+    pub fn toggle_dark_mode(&mut self) {
+        self.dark_mode = !self.dark_mode;
+    }
+
+    pub fn is_api_key_initialized(&self) -> bool {
+        self.api_key_initialized
+    }
+
+    pub fn set_api_key_initialized(&mut self, value: bool) {
+        self.api_key_initialized = value;
+    }
+}
+
+impl Default for HeadlinesConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Headlines {
+    pub fn adjust_theme(&self, ctx: &egui::Context) -> () {
+        if self.config.dark_mode {
+            ctx.set_visuals(egui::Visuals::dark());
+        } else {
+            ctx.set_visuals(egui::Visuals::light());
+        }
+    }
+
     pub fn new() -> Self {
         let mock_iter = (0..20).map(|a| NewsCardData {
             title: format!("Title {}!", a),
@@ -21,8 +70,13 @@ impl Headlines {
             desciption: format!("This is a description for {}", a),
         });
 
+        let config: HeadlinesConfig = confy::load("gui_news", "headlines").unwrap_or_default();
+
+        tracing::info!("Loaded config: {:?}", config);
+
         Headlines {
             articles: Vec::from_iter(mock_iter),
+            config,
         }
     }
 
@@ -51,12 +105,20 @@ impl Headlines {
     }
 
     pub fn render_news_cards(&self, ui: &mut egui::Ui) {
+        let mut title_color = egui::Color32::from_rgb(255, 255, 255);
+        let mut hyperlink_color = egui::Color32::from_rgb(0, 255, 255);
+
+        if !self.config.dark_mode {
+            title_color = egui::Color32::from_rgb(0, 0, 0);
+            hyperlink_color = egui::Color32::from_rgb(0, 0, 255);
+        }
+
         for article in &self.articles {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.add_space(PADDING);
                     let title = format!("> {}", article.title);
-                    ui.colored_label(egui::Color32::from_rgb(255, 255, 255), title);
+                    ui.colored_label(title_color, title);
 
                     ui.add_space(PADDING);
 
@@ -64,7 +126,7 @@ impl Headlines {
                         Label::new(&article.desciption).text_style(egui::TextStyle::Button);
                     ui.add(description);
 
-                    ui.style_mut().visuals.hyperlink_color = egui::Color32::from_rgb(0, 255, 255);
+                    ui.style_mut().visuals.hyperlink_color = hyperlink_color;
                     ui.add_space(PADDING);
 
                     ui.with_layout(Layout::right_to_left(), |ui| {
@@ -77,22 +139,62 @@ impl Headlines {
         }
     }
 
-    pub fn render_top_panel(&self, ctx: &egui::CtxRef) {
+    pub fn render_top_panel(&mut self, ctx: &egui::CtxRef, frame: &mut Frame) {
         TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.add_space(10.);
             egui::menu::bar(ui, |ui| {
                 ui.with_layout(Layout::left_to_right(), |ui| {
-                    ui.add(Label::new("📰").text_style(egui::TextStyle::Heading));
+                    ui.add(Label::new("📰 Feed").text_style(egui::TextStyle::Heading));
                 });
 
                 ui.with_layout(Layout::right_to_left(), |ui| {
-                    let close_btn = ui.add(Button::new("❎").text_style(egui::TextStyle::Heading));
-                    let refresh_btn =
-                        ui.add(Button::new("🔄").text_style(egui::TextStyle::Heading));
-                    let theme_btn = ui.add(Button::new("🌙").text_style(egui::TextStyle::Heading));
+                    let close_btn = ui.add(Button::new("❎").text_style(egui::TextStyle::Button));
+                    let _refresh_btn =
+                        ui.add(Button::new("🔄").text_style(egui::TextStyle::Button));
+                    let theme_btn = ui.add(
+                        Button::new({
+                            if self.config.dark_mode {
+                                "🌞"
+                            } else {
+                                "🌚"
+                            }
+                        })
+                        .text_style(egui::TextStyle::Button),
+                    );
+
+                    if theme_btn.clicked() {
+                        self.config.toggle_dark_mode();
+                    }
+
+                    if close_btn.clicked() {
+                        frame.quit();
+                    }
                 })
             });
             ui.add_space(10.);
         });
+    }
+
+    pub fn render_config(&mut self, ctx: &CtxRef) {
+        Window::new("Configuration")
+            .anchor(Align2::LEFT_TOP, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("API Key");
+                        let text_input = ui.text_edit_singleline(&mut self.config.api_key);
+
+                        if text_input.lost_focus() || ui.input().key_released(egui::Key::Enter) {
+                            if let Err(err) = confy::store("gui_news", "headlines", &self.config) {
+                                tracing::error!("Failed to store config: {:?}", err);
+                            } else {
+                                tracing::info!("Stored config");
+                                self.config.set_api_key_initialized(true);
+                            }
+                        }
+                    });
+                    ui.label("You may find your API key at newsapi.org");
+                })
+            });
     }
 }

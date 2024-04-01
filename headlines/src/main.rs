@@ -4,6 +4,7 @@ use eframe::egui::{self, Hyperlink, Label, ScrollArea, Separator, TopBottomPanel
 use eframe::epi::{App, Frame};
 use eframe::run_native;
 use headlines::{Headlines, PADDING};
+use tracing_subscriber;
 
 impl App for Headlines {
     fn setup(
@@ -15,15 +16,22 @@ impl App for Headlines {
         self.config_fonts(ctx);
     }
 
-    fn update(&mut self, ctx: &egui::CtxRef, _frame: &mut Frame) {
-        self.render_top_panel(ctx);
-        egui::CentralPanel::default().show(ctx, |ui| {
-            render_header(ui);
-            ScrollArea::auto_sized().show(ui, |ui| {
-                self.render_news_cards(ui);
+    fn update(&mut self, ctx: &egui::CtxRef, frame: &mut Frame) {
+        if self.config.is_api_key_initialized() {
+            // self.fetch_headlines();
+
+            self.adjust_theme(ctx);
+            self.render_top_panel(ctx, frame);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                render_header(ui);
+                ScrollArea::auto_sized().show(ui, |ui| {
+                    self.render_news_cards(ui);
+                });
+                render_footer(ctx);
             });
-            render_footer(ctx);
-        });
+        } else {
+            self.render_config(ctx);
+        }
     }
 
     fn name(&self) -> &str {
@@ -32,13 +40,19 @@ impl App for Headlines {
 }
 
 fn render_footer(ctx: &egui::CtxRef) {
+    let mut label_color = egui::Color32::from_rgb(255, 255, 255);
+
+    if !ctx.style().visuals.dark_mode {
+        label_color = egui::Color32::from_rgb(0, 0, 0);
+    }
+
     TopBottomPanel::bottom("footer").show(ctx, |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(10.);
             // add the api source website
             ui.add(
                 Label::new("Powered by NewsAPI.org")
-                    .text_color(egui::Color32::from_rgb(255, 255, 255))
+                    .text_color(label_color)
                     .monospace(),
             );
             // add link to the source code
@@ -62,9 +76,10 @@ fn render_header(ui: &mut egui::Ui) {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let app = headlines::Headlines::new();
     let native_options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(1024.0, 768.0)),
+        initial_window_size: Some(egui::vec2(600.0, 900.0)),
         ..Default::default()
     };
 
