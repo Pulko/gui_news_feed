@@ -1,9 +1,12 @@
 mod headlines;
 
+use std::thread;
+
+use api::NewsApi;
 use eframe::egui::{self, Hyperlink, Label, ScrollArea, Separator, TopBottomPanel};
 use eframe::epi::{App, Frame};
 use eframe::run_native;
-use headlines::{Headlines, PADDING};
+use headlines::{Headlines, Message, NewsCardData, PADDING};
 use tracing_subscriber;
 
 impl App for Headlines {
@@ -14,12 +17,36 @@ impl App for Headlines {
         _storage: Option<&dyn eframe::epi::Storage>,
     ) {
         self.config_fonts(ctx);
+
+        let api_key = self.config.api_key.to_string();
+        let (mut news_tx, news_rx) = std::sync::mpsc::channel::<NewsCardData>();
+        let (app_tx, app_rx) = std::sync::mpsc::sync_channel(1);
+
+        self.news_rx = Some(news_rx);
+        self.app_tx = Some(app_tx);
+
+        thread::spawn(move || {
+            if !api_key.is_empty() {
+                fetch_news(&api_key, &mut news_tx);
+            } else {
+                loop {
+                    match app_rx.recv() {
+                        Ok(Message::ApiKeySet(api_key)) => {
+                            fetch_news(&api_key, &mut news_tx);
+                        }
+                        Err(error) => {
+                            tracing::error!("Error receiving message: {:?}", error);
+                        }
+                    }
+                }
+            }
+        });
     }
 
     fn update(&mut self, ctx: &egui::CtxRef, frame: &mut Frame) {
-        if self.config.is_api_key_initialized() {
-            // self.fetch_headlines();
-
+        if self.is_api_key_initialized() {
+            ctx.request_repaint();
+            self.preload_news();
             self.adjust_theme(ctx);
             self.render_top_panel(ctx, frame);
             egui::CentralPanel::default().show(ctx, |ui| {
@@ -36,6 +63,32 @@ impl App for Headlines {
 
     fn name(&self) -> &str {
         "Headlines"
+    }
+}
+
+fn fetch_news(api_key: &str, news_tx: &mut std::sync::mpsc::Sender<NewsCardData>) {
+    let fetching = NewsApi::new(api_key)
+        .endpoint(api::Endpoint::TopHeadlines)
+        .country(api::Country::Us)
+        .fetch();
+
+    match fetching {
+        Ok(response) => {
+            for article in response.get_articles() {
+                let news_card = headlines::NewsCardData {
+                    title: article.title().to_string(),
+                    url: article.url().to_string(),
+                    desciption: article.desciption().to_string(),
+                };
+
+                if let Err(error) = news_tx.send(news_card) {
+                    tracing::error!("Error creating news card: {:?}", error)
+                };
+            }
+        }
+        Err(e) => {
+            tracing::error!("Error fetching news: {}", e);
+        }
     }
 }
 

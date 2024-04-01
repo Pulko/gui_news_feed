@@ -8,22 +8,28 @@ use std::borrow::Cow;
 
 pub const PADDING: f32 = 5.0;
 
+pub enum Message {
+    ApiKeySet(String),
+}
+
 pub struct Headlines {
-    articles: Vec<NewsCardData>,
+    pub articles: Vec<NewsCardData>,
     pub config: HeadlinesConfig,
+    pub api_key_initialized: bool,
+    pub news_rx: Option<std::sync::mpsc::Receiver<NewsCardData>>,
+    pub app_tx: Option<std::sync::mpsc::SyncSender<Message>>,
 }
 
 pub struct NewsCardData {
-    title: String,
-    url: String,
-    desciption: String,
+    pub title: String,
+    pub url: String,
+    pub desciption: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HeadlinesConfig {
     dark_mode: bool,
     pub api_key: String,
-    pub api_key_initialized: bool,
 }
 
 impl HeadlinesConfig {
@@ -31,20 +37,11 @@ impl HeadlinesConfig {
         Self {
             dark_mode: true,
             api_key: "".to_string(),
-            api_key_initialized: false,
         }
     }
 
     pub fn toggle_dark_mode(&mut self) {
         self.dark_mode = !self.dark_mode;
-    }
-
-    pub fn is_api_key_initialized(&self) -> bool {
-        self.api_key_initialized
-    }
-
-    pub fn set_api_key_initialized(&mut self, value: bool) {
-        self.api_key_initialized = value;
     }
 }
 
@@ -63,20 +60,25 @@ impl Headlines {
         }
     }
 
-    pub fn new() -> Self {
-        let mock_iter = (0..20).map(|a| NewsCardData {
-            title: format!("Title {}!", a),
-            url: "https://example.com".to_string(),
-            desciption: format!("This is a description for {}", a),
-        });
+    pub fn is_api_key_initialized(&self) -> bool {
+        self.api_key_initialized
+    }
 
+    pub fn set_api_key_initialized(&mut self, value: bool) {
+        self.api_key_initialized = value;
+    }
+
+    pub fn new() -> Self {
         let config: HeadlinesConfig = confy::load("gui_news", "headlines").unwrap_or_default();
 
         tracing::info!("Loaded config: {:?}", config);
 
         Headlines {
-            articles: Vec::from_iter(mock_iter),
+            articles: vec![],
+            api_key_initialized: !config.api_key.is_empty(),
             config,
+            news_rx: None,
+            app_tx: None,
         }
     }
 
@@ -102,6 +104,17 @@ impl Headlines {
             .insert(0, "MesloLGS".to_string());
 
         ctx.set_fonts(fonts);
+    }
+
+    pub fn preload_news(&mut self) {
+        if let Some(rx) = &self.news_rx {
+            match rx.try_recv() {
+                Ok(news_card) => {
+                    self.articles.push(news_card);
+                }
+                Err(_) => {}
+            }
+        }
     }
 
     pub fn render_news_cards(&self, ui: &mut egui::Ui) {
@@ -189,7 +202,12 @@ impl Headlines {
                                 tracing::error!("Failed to store config: {:?}", err);
                             } else {
                                 tracing::info!("Stored config");
-                                self.config.set_api_key_initialized(true);
+                                self.set_api_key_initialized(true);
+
+                                if let Some(tx) = &self.app_tx {
+                                    let _ = tx
+                                        .send(Message::ApiKeySet(self.config.api_key.to_string()));
+                                }
                             }
                         }
                     });

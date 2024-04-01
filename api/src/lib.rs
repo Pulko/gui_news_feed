@@ -47,6 +47,7 @@ impl NewsApiResponse {
 pub struct Article {
     pub title: String,
     pub url: String,
+    pub description: Option<String>,
 }
 
 impl Article {
@@ -56,6 +57,23 @@ impl Article {
 
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    pub fn desciption(&self) -> &str {
+        match &self.description {
+            Some(desc) => desc,
+            None => "",
+        }
+    }
+}
+
+impl Default for Article {
+    fn default() -> Self {
+        Article {
+            title: "".to_string(),
+            url: "".to_string(),
+            description: None,
+        }
     }
 }
 
